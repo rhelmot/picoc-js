@@ -94,62 +94,6 @@ function Lexer(picoparent) {
      * The other NextIs functions are for operators of more than 2 chars.
      */
 
-    function NextIs(chrs, def) {
-        var src = getc();
-        var pos = masterPos.copy();
-        inc();
-        for (c in chrs) {
-            if (c === null) continue;
-            if (getc() === c) {
-                src += c;
-                inc();
-                return new Token(chrs[c], pos, src);
-            }
-        }
-        return new Token(def, pos, src);
-    }
-    
-    function NextIs3Plus(c,x,d,y,e,z,a) {
-        var src = getc();
-        var pos = masterPos.copy();
-        inc();
-        if (getc() === c) {
-            src += c;
-            inc(); 
-            return new Token(x, pos, src);
-        } else if (getc() === d) {
-            src += d;
-            if (getc(1) == e) {
-                src += e;
-                inc(2);
-                return new Token(z, pos, src);
-            } else { 
-                inc();
-                return new Token(y, pos, src);
-            } 
-        } else {
-            return new Token(a, pos, src);
-        }
-    }
-    function NextIsExactly3(c,d,y,z) {
-        var src = getc();
-        var pos = masterPos.copy();
-        inc();
-        if (getc() === c && getc(1) === d) { 
-            src += c + d;
-            inc(2);
-            return new Token(y, pos, src);
-        } else {
-            return new Token(z, pos, src);
-        }
-    }
-
-    function Basic(c) {
-        var src = getc();
-        var pos = masterPos.copy();
-        inc();
-        return new Token(c, pos, src);
-    }
 
     this.lex = function (source) {
         var masterPos = new SourcePosition(source);
@@ -168,6 +112,63 @@ function Lexer(picoparent) {
         function Error(msg) {
             if (error != '') return;
             error = 'Error: ' + masterPos.toString() + ': ' + msg;
+        }
+    
+        function NextIs(chrs, def) {
+            var src = getc();
+            var pos = masterPos.copy();
+            inc();
+            for (c in chrs) {
+                if (c === null) continue;
+                if (getc() === c) {
+                    src += c;
+                    inc();
+                    return new Token(chrs[c], pos, src);
+                }
+            }
+            return new Token(def, pos, src);
+        }
+
+        function NextIs3Plus(c,x,d,y,e,z,a) {
+            var src = getc();
+            var pos = masterPos.copy();
+            inc();
+            if (getc() === c) {
+                src += c;
+                inc(); 
+                return new Token(x, pos, src);
+            } else if (getc() === d) {
+                src += d;
+                if (getc(1) == e) {
+                    src += e;
+                    inc(2);
+                    return new Token(z, pos, src);
+                } else { 
+                    inc();
+                    return new Token(y, pos, src);
+                } 
+            } else {
+                return new Token(a, pos, src);
+            }
+        }
+        function NextIsExactly3(c,d,y,z) {
+            var src = getc();
+            var pos = masterPos.copy();
+            inc();
+            if (getc() === c && getc(1) === d) { 
+                src += c + d;
+                inc(2);
+                return new Token(y, pos, src);
+            } else {
+                return new Token(z, pos, src);
+            }
+        }
+
+        function Basic(c) {
+            var src = getc();
+            var pos = masterPos.copy();
+            inc();
+            return new Token(c, pos, src);
         }
 
         function Tokenize() {

@@ -1,8 +1,45 @@
-function Filesystem() {
+function Filesystem(stdin, stdout, stderr) {
     this.files = {}
+    this.stdin = stdin || globalStdin || {value: ''};
+    this.stdout = stdout || globalStdout || {value: ''};
+    this.stderr = stderr || globalStderr || globalStdout || {value: ''};
+}
+
+function HTMLReader(element, clearEveryTime) {
+    return {
+        read: function () {
+            var out = element.value;
+            if (clearEveryTime) {
+                element.value = '';
+            }
+            return out;
+        },
+        write: function () {},
+        close: function () {}
+    };
+}
+
+function HTMLWriter(element, clearEveryTime) {
+    return {
+        read: function () {},
+        write: function (data) {
+            if (clearEveryTime) {
+                element.value = '';
+            }
+            element.value += data;
+        },
+        close: function () {}
+    };
 }
 
 Filesystem.prototype.open = function (path) {
+    if (path === '/dev/stdin') {
+       return HTMLReader(this.stdin);
+    } else if (path === '/dev/stdout') {
+        return HTMLWriter(this.stdout);
+    } else if (path === '/dev/stderr') {
+        return HTMLWriter(this.stderr);
+    }
     return new FileHandle(this, path);
 };
 
