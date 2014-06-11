@@ -28,7 +28,7 @@ function Parser (picoparent) {
         }
 
         function forceListType(node, type) {
-            if (node.operator.Enum !== type.Enum) {
+            if (node.opnum !== type.Enum) {
                 node = new ValueNode(type, [node]);
             }
             return node;
@@ -42,7 +42,7 @@ function Parser (picoparent) {
                 if (ttoken.type === endtoken) {
                     break;
                 } else if (openTokens.indexOf(ttoken.type) >= 0) {
-                    var l = makeExprTree(closeTokens[openTokens.indexOf(ttoken.type)]);
+                    var l = parseExpression(closeTokens[openTokens.indexOf(ttoken.type)]);
                     if (l === null) return null;
                     if (ttoken.type === LexToken.OPENBRACKET) {
                         if (isValue(list[list.length-1])) {
@@ -153,7 +153,7 @@ function Parser (picoparent) {
         }
 
         var binaryOps = [LexToken.ASTERISK, LexToken.SLASH, LexToken.MODULUS, LexToken.PLUS, LexToken.MINUS, LexToken.SHIFTRIGHT, LexToken.SHIFTLEFT, LexToken.GREATERTHAN, LexToken.LESSTHAN, LexToken.GREATEREQUAL, LexToken.LESSEQUAL, LexToken.EQUAL, LexToken.NOTEQUAL, LexToken.AMPERSAND, LexToken.ARITHMETICXOR, LexToken.ARITHMETICOR, LexToken.LOGICALAND, LexToken.LOGICALOR];
-        var binaryOpOps = [Operators.MULTIPLY, Operators.DIVIDE, Operators.MODULUS, Operators.ADD, Operators.SUBTRACT, Operators.GREATERTHAN, Operators.LESSTHAN, Operators.GREATERTHANEQUAL, Operators.LESSTHANEQUAL, Operators.EQUALS, Operators.NOTEQUALS, Operators.BINARYAND, Operators.XOR, Operators.BINARYOR, Operators.UNARYAND, Operators.UNARYOR];
+        var binaryOpOps = [Operators.MULTIPLY, Operators.DIVIDE, Operators.MODULUS, Operators.ADD, Operators.SUBTRACT, Operators.RIGHTSHIFT, Operators.LEFTSHIFT, Operators.GREATERTHAN, Operators.LESSTHAN, Operators.GREATERTHANEQUALS, Operators.LESSTHANEQUALS, Operators.EQUALS, Operators.NOTEQUALS, Operators.BINARYAND, Operators.XOR, Operators.BINARYOR, Operators.UNARYAND, Operators.UNARYOR];
 
         function binaryParse(list) {
             if (list === null) return null;
@@ -267,28 +267,292 @@ function Parser (picoparent) {
             return out;
         }
 
-        function parseStatement() {
-            return parseExpression(LexToken.SEMICOLON);
-            //TODO: Add statements other than pure expressions
-        }
-
-        function parseBlock(singular) {
-            var lines = [];
-            if (singular) {
-                lines[0] = parseStatement(LexToken.SEMICOLON);
-                if (lines[0] === null) {
-
+        function parseDeclaration(parentBlock) {
+            var type = parseBasicType(get, inc, parentBlock);
+            if (type === null) { // TODO: Less pissy error message :P
+                Error("Types isn't happy at you", get());
+                return null;
+            }
+            var expr = parseExpression(LexToken.SEMICOLON);
+            if (expr === null) return null;
+            if (expr.nary === 0) {
+                if (expr.opnum === Operators.TUPLE.Enum) {
+                    for (var i = 0; i < expr.operand1.length; i++) {
+                        var sexpr = expr.operand1[i];
+                        var m = sortLvalType(type, sexpr, parentBlock);
+                        if (m === null) {
+                            Error("Types still isn't happy with you", sexpr);
+                            return null;
+                        } else if (typeof m == 'string') {
+                            Error(m, sexpr);
+                            return null;
+                        }
+                        expr.operand1[i] = m;
+                    }
                 }
             } else {
-                while (get().type !== LexToken.EOF get().type !== LexToken.RIGHTBRACE) {
-                    var cexp = parseStatement(LexToken.SEMICOLON);
-                    if (cexp === null) return null;
-                    expressions.push(cexp);
+                var m = sortLvalType(type, expr, parentBlock);
+                if (m === null) {
+                    Error("Types still isn't happy with you", sexpr);
+                    return null;
+                } else if (typeof m == 'string') {
+                    Error(m, expr);
+                    return null;
                 }
+                expr = m;
             }
+            return new Statement(Statements.DECLARATION, type, expr);
+        }
 
+        function parseStatement(parentBlock) {
+            switch ((get() || {}).type) {
+            case undefined:
+                Error("**** CRITICAL *** How'd an undefined end up in the input stream?", get(-1));
+                return null;
+            case LexToken.EOF:
+                Error("Unexpected end of file", get());
+                return null;
+            case LexToken.IDENTIFIER:
+                // Might be a typedef-typed variable declarataion
+                // Or could be an expression
+                var firstVar = parentBlock.resolveVar(get().value);
+                if (firstVar) {
+                    if (firstVar.type.baseType === BaseTypes.TYPE) {
+                        return parseDeclaration(parentBlock);
+                    }
+                } else {
+                    // Though it might be a goto label
+                    if ((get(1) || {}).type === LexToken.COLON) {
+                        parentBlock.registerLabel(get().value);
+                        inc(2);
+                        return true;
+                    }
+                }
+                // Fall through to expression parsing!
+
+            case LexToken.ASTERISK:
+            case LexToken.AMPERSAND:
+            case LexToken.INCREMENT:
+            case LexToken.DECREMENT:
+            case LexToken.OPENBRACKET:
+                var exp = parseExpression(LexToken.SEMICOLON);
+                if (exp === null) return null;
+                else return new Statement(Statements.EXPRESSION, exp);
+
+            case LexToken.LEFTBRACE:
+                var block = parseBlock(parentBlock, BlockTypes.WHATEVER);
+                if (block === null) return null;
+                else return new Statement(Statements.WHATEVERBLOCK, block);
+
+            case LexToken.IF:
+                var conditions = [];
+                var blocks = [];
+                inc();
+                if ((get() || {}).type !== LexToken.OPENBRACKET) {
+                    Error("'(' expected", get(-1));
+                    return null;
+                }
+                inc();    // Handle if() body
+                conditions[0] = parseExpression(LexToken.CLOSEBRACKET);
+                if (conditions[0] === null) return null;
+                blocks[0] = parseBlock(parentBlock, BlockTypes.IF);
+                if (blocks[0] === null) return null;
+                while ((get() || {}).type === LexToken.ELSE && (get() || {}).type === LexToken.IF) {
+                    inc();
+                    inc();
+                    if ((get() || {}).type !== LexToken.OPENBRACKET) {
+                        Error("'(' expected", get(-1));
+                        return null;
+                    }
+                    inc();        // Handle else if() bodies
+                    conditions.push(parseExpression(LexToken.CLOSEBRACKET));
+                    if (conditions[conditions.length-1] === null) return null;
+                    blocks.push(parseBlock(parentBlock, BlockTypes.IF));
+                    if (blocks[blocks.length-1] === null) return null;
+                }
+                if ((get() || {}).type === LexToken.ELSE) {
+                    inc();        // Handle else body
+                    conditions.push(true);
+                    blocks.push(parseBlock(parentBlock, BlockTypes.IF));
+                    if (blocks[blocks.length-1] === null) return null;
+                }
+                return new Statement(Statements.IF, conditions, blocks);
+
+            case LexToken.WHILE:
+                inc();
+                if ((get() || {}).type !== LexToken.OPENBRACKET) {
+                    Error("'(' expected", get(-1));
+                    return null;
+                }
+                inc();
+                var condition = parseExpression(LexToken.CLOSEBRACKET);
+                if (condition === null) return null;
+                var block = parseBlock(parentBlock, BlockTypes.WHILE);
+                if (block === null) return null;
+                return new Statement(Statements.WHILE, false, condition, block);
+
+            case LexToken.DO:
+                inc();
+                var block = parseBlock(parentBlock, BlockTypes.WHILE);
+                if (block === null) return null;
+                if ((get() || {}).type !== LexToken.OPENBRACKET) {
+                    Error("'(' expected", get(-1));
+                    return null;
+                }
+                var condition = parseExpression(LexToken.SEMICOLON);
+                if (condition === null) return null;
+                return new Statement(Statements.WHILE, false, condition, block);
+
+            case LexToken.FOR:
+                inc();
+                if ((get() || {}).type !== LexToken.OPENBRACKET) {
+                    Error("'(' expected", get(-1));
+                    return null;
+                }
+                inc();
+                var ex1 = parseExpression(LexToken.SEMICOLON);
+                if (ex1 === null) return null;
+                var ex2 = parseExpression(LexToken.SEMICOLON);
+                if (ex2 === null) return null;
+                var ex3 = parseExpression(LexToken.CLOSEBRACKET);
+                if (ex3 === null) return null;
+                var block = parseBlock(parentBlock, BlockTypes.FOR);
+                if (block === null) return null;
+                return new Statement(Statements.FOR, ex1, ex2, ex3, block);
+
+            case LexToken.INTTYPE:
+            case LexToken.SHORTTYPE:
+            case LexToken.CHARTYPE:
+            case LexToken.LONGTYPE:
+            case LexToken.FLOATTYPE:
+            case LexToken.DOUBLETYPE:
+            case LexToken.VOIDTYPE:
+            case LexToken.STRUCTTYPE:
+            case LexToken.UNIONTYPE:
+            case LexToken.ENUMTYPE:
+            case LexToken.SIGNEDTYPE:
+            case LexToken.UNSIGNEDTYPE:
+            case LexToken.STATICTYPE:
+            case LexToken.AUTOTYPE:
+            case LexToken.REGISTERTYPE:
+            case LexToken.EXTERNTYPE:
+                return parseDeclaration(parentBlock);
+
+            case LexToken.SWITCH:
+                inc();
+                if ((get() || {}).type !== LexToken.OPENBRACKET) {
+                    Error("'(' expected", get(-1));
+                    return null;
+                }
+                inc();
+                var condition = parseExpression(LexToken.CLOSEBRACKET);
+                if (condition === null) return null;
+                var block = parseBlock(parentBlock, BlockTypes.SWITCH);
+                if (block === null) return null;
+                return new Statement(Statements.SWITCH, condition, block);
+
+            case LexToken.CASE:     // Getting super meta up in here
+                inc();
+                var tok = get() || {};
+                if (tok.type !== LexToken.INTEGERCONSTANT && tok.type !== LexToken.FPCONSTANT && tok.type !== LexToken.CHARACTERCONSTANT) {
+                    Error("Expected integer, floating point, or character constant", get(-1));
+                    return null;
+                }
+                inc();
+                if ((get() || {}).type !== LexToken.COLON) {
+                    Error("':' Expected", get(-1));
+                    return null;
+                }
+                inc();
+                if (!parentBlock.registerCase(tok.value)) {
+                    Error("Case statement outside a switch() block", tok);
+                    return null;
+                }
+                return true;
+
+            case LexToken.DEFAULT:
+                inc();
+                if ((get() || {}).type !== LexToken.COLON) {
+                    Error("':' Expected", get(-1));
+                    return null;
+                }
+                inc();
+                if (!parentBlock.registerCase(null)) {
+                    Error("Default statement outside a switch() block", tok);
+                    return null;
+                }
+                return true;
+
+            case LexToken.BREAK:
+                inc();
+                if ((get() || {}).type !== LexToken.SEMICOLON) {
+                    Error("';' Expected", get(-1));
+                    return null;
+                }
+                return new Statement(Statements.BREAK);
+
+            case LexToken.CONTINUE:
+                inc();
+                if ((get() || {}).type !== LexToken.SEMICOLON) {
+                    Error("';' Expected", get(-1));
+                    return null;
+                }
+                return new Statement(Statements.CONTINUE);
+
+            case LexToken.RETURN:
+                inc();
+                var exp = parseExpression(LexToken.SEMICOLON);
+                if (exp === null) return null;
+                return new Statement(Statements.RETURN, exp);
+
+            case LexToken.TYPEDEF:
+                Error("lolnope", get());
+                return null;
+
+            case LexToken.GOTO:
+                inc();
+                var tok = get() || {};
+                if (tok.type !== LexToken.IDENTIFIER) {
+                    Error("Expected identifier", get(-1));
+                    return null;
+                }
+                inc();
+                if ((get() || {}).type !== LexToken.SEMICOLON) {
+                    Error("';' Expected", get(-1));
+                    return null;
+                }
+                inc();
+                return new Statement(Statements.GOTO, tok.value);
+
+            default:
+                break;
+            }
+            Error("Unknown or unexpected token", get());
+            return null;
+        }
+
+        function parseBlock(parentBlock, blockType) {
+            var myBlock = new Block(parentBlock, blockType);
+            var cexp;
+            if ((get() || {}).type === LexToken.LEFTBRACE) {
+                inc();
+                while (get().type !== LexToken.EOF && get().type !== LexToken.RIGHTBRACE) {
+                    cexp = parseStatement(myBlock);
+                    if (cexp === null) return null;
+                    myBlock.addStatement(cexp);
+                }
+                inc();
+            } else {
+                cexp = parseStatement(myBlock);
+                if (cexp === null) return null;
+                myBlock.addStatement(cexp);
+            }
+            return myBlock;
+        }
+
+        var booboo = parseBlock(null, BlockTypes.FUNCTION);
         if (errors.length === 0) {
-            return {list: expressions};
+            return booboo;
         } else {
             return errors;
         }
@@ -538,3 +802,147 @@ function ValueNode(token, operand1, operand2, operand3) {
         return;
     }
 }
+
+// This mostly serves as documentation for how to use the Statement class
+// Just call new Statement(Statements.NAME, arg1, arg2, etc)
+// the arguments will be put into the fields in the arguments list.
+
+Statements = {
+    EXPRESSION: {
+        type: 0,
+        expression: null,
+        arguments: ['expression']
+    },
+    DECLARATION: {
+        type: 1,
+        vartype: null,
+        expression: null,
+        arguments: ['vartype','expression']
+    },
+    IF: {
+        type: 2,
+        conditions: [null],
+        blocks: [null],
+        arguments: ['conditions', 'blocks']
+        // Else blocks are handled with a final block with literal `true` conditions
+    },
+    WHILE: {
+        type: 3,
+        condition: null,
+        block: null,
+        dofirst: false,
+        arguments: ['dofirst', 'condition', 'block']
+    },
+    FOR: {
+        type: 4,
+        initializer: null,
+        condition: null,
+        iterator: null,
+        block: null,
+        arguments: ['initializer', 'condition', 'iterator', 'block']
+    },
+    SWITCH: {
+        type: 5,
+        expression: null,
+        block: null,
+        arguments: ['expression', 'block']
+    },
+    BREAK: {type: 6, arguments: []},
+    CONTINUE: {type: 7, arguments: []},
+    RETURN: {
+        type: 8,
+        expression: null,
+        arguments: ['expression']
+    },
+    GOTO: {
+        type: 9,
+        label: null,
+        arguments: ['label']
+    },
+    WHATEVERBLOCK: {
+        type: 10,
+        block: null,
+        arguments: ['block']
+    }
+};
+
+function Statement(type) {
+    //assert type in Statements
+    this.type = type;
+    this.Enum = type.type;
+    for (var i = 0; i < type.arguments.length; i++) {
+        this[type.arguments[i]] = arguments[i+1];
+    }
+}
+
+var BlockTypes = {
+    FUNCTION: 0,
+    LOOP: 1,
+    SWITCH: 2,
+    WHATEVER: 3
+};
+
+function Block(parentBlock, blockType) {
+    this.blockType = blockType;
+    this.vars = {};
+    this.statements = [];
+    this.labels = {};
+    this.cases = {};
+    this.parentBlock = parentBlock;
+    if (parentBlock) {
+        //parentBlock.childBlocks[parentBlock.childBlocks.length] = this;
+        this.parentReentryPoint = parentBlock.statements.length + 1;
+        // This should be the index of the place to execute next
+        // After this block has finished
+    }
+}
+
+Block.prototype.registerVar = function (variable) {
+    this.vars[variable.name] = variable;
+};
+
+Block.prototype.resolveVar = function (varname) {
+    if (varname in this.vars) return this.vars[varname];
+    else if (this.parentBlock) return this.parentBlock.resolveVar(varname);
+    else return null;
+};
+
+Block.prototype.addLabel = function (label) {
+    this.labels[label] = this.statements.length;
+};
+
+Block.prototype.addStatement = function (statement) {
+    if (statement instanceof Statement) {
+        this.statements.push(statement);
+    }
+};
+
+Block.prototype.registerCase = function (token, childBlock) {
+    if (this.blockType === BlockTypes.SWITCH) {
+        this.cases[token] = childBlock || this.statements.length;
+        return true;
+    } else if (this.blockType === BlockTypes.FUNCTION) {
+        return false;
+    } else {
+        if (!this.parentBlock.registerCase(token, this)) {
+            return false;
+        } else {
+            this.cases[token] = childBlock || this.statements.length;
+            return true;
+        }
+    }
+};
+
+Block.prototype.registerLabel = function (label, childBlock) {
+    this.labels[label] = childBlock || this.statements.length;
+    if (this.blockType === BlockTypes.FUNCTION) return;
+    this.parentBlock.registerLabel(label, this);
+};
+
+/* Funcdata format
+{
+    args: [Type, Type, ...],
+    block: Block
+}
+*/
+

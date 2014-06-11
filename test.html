@@ -16,6 +16,7 @@ textarea[readonly] {
 <script src="preprocessor.js"></script>
 <script src="lex.js"></script>
 <script src="parser.js"></script>
+<script src="types.js"></script>
 <script>
 var P;
 window.onload = function () {
@@ -28,13 +29,27 @@ window.onload = function () {
 </head>
 <body>
 <textarea id="stdin">
-    IncludeRegister("stdbool.h", &amp;StdboolSetupFunc, NULL, StdboolDefs);
-    IncludeRegister("stdio.h", &amp;StdioSetupFunc, &amp;StdioFunctions[0], StdioDefs);
-    IncludeRegister("stdlib.h", &amp;StdlibSetupFunc, &amp;StdlibFunctions[0], NULL);
-    IncludeRegister("string.h", &amp;StringSetupFunc, &amp;StringFunctions[0], NULL);
-    IncludeRegister("time.h", &amp;StdTimeSetupFunc, &amp;StdTimeFunctions[0], StdTimeDefs);
-    IncludeRegister("unistd.h", &amp;UnistdSetupFunc, &amp;UnistdFunctions[0], UnistdDefs);
-
+    {
+        int x, y, *z = &x;
+        float d = 39.5;
+        x = z;
+        y = x % 8;
+        switch (y) {
+        case 7:
+        case 6:
+        case 5:
+            for (d = 80.0; d &gt; 20; d /= 2) {
+            case 4:
+                printf("asdf");
+            }
+        case 3:
+            if (x % d &gt;= d/2) {
+            default:
+                d *= d;
+            }
+            while (d &gt; 1) printf("Wizards abound\n");
+        }
+    }
 </textarea>
 <textarea id="stdout" readonly></textarea>
 <textarea id="stderr" readonly></textarea>
